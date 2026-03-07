@@ -36,6 +36,7 @@ class Case(Base):
     consent_for_face_matching: Mapped[bool] = mapped_column(Boolean, default=False)
     usernames_csv: Mapped[str] = mapped_column(Text, default='')
     emails_csv: Mapped[str] = mapped_column(Text, default='')
+    known_accounts_csv: Mapped[str] = mapped_column(Text, default='')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by: Mapped[int] = mapped_column(ForeignKey('users.id'))
 

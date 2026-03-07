@@ -17,12 +17,12 @@ def _engine_kwargs(url: str) -> dict:
 
 
 def _build_engine_with_fallback(primary_url: str):
-    primary_engine = create_engine(primary_url, **_engine_kwargs(primary_url))
     try:
+        primary_engine = create_engine(primary_url, **_engine_kwargs(primary_url))
         with primary_engine.connect() as conn:
             conn.execute(text('SELECT 1'))
         return primary_engine, primary_url
-    except SQLAlchemyError:
+    except (SQLAlchemyError, ModuleNotFoundError):
         if not primary_url.startswith('postgresql'):
             raise
         fallback_url = 'sqlite:///./osint.db'

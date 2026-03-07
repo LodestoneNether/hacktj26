@@ -13,6 +13,7 @@
       <h1>{{ case.title }}</h1>
       <p>{{ case.notes }}</p>
       <p><strong>Legal basis:</strong> {{ case.legal_basis }} | <strong>Purpose:</strong> {{ case.purpose }}</p>
+      <p><strong>Known account baseline:</strong> {{ case.known_accounts_csv if case.known_accounts_csv else 'None' }}</p>
 
       <section class="card">
         <h2>Run Investigation</h2>

@@ -14,10 +14,31 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap',
 }).addTo(map);
 
-const locationCoords = {
-  'Austin, TX': [30.2672, -97.7431],
-  'San Marcos, TX': [29.8833, -97.9414],
-};
+let markers = [];
+
+function clearMarkers() {
+  markers.forEach((m) => map.removeLayer(m));
+  markers = [];
+}
+
+function plotGraphLocations(graphData) {
+  clearMarkers();
+  const points = graphData.nodes
+    .filter((n) => n.type === 'Location' && Number.isFinite(n.lat) && Number.isFinite(n.lon))
+    .map((n) => ({ lat: n.lat, lon: n.lon, label: n.label, method: n.method || 'unknown' }));
+
+  if (!points.length) {
+    return;
+  }
+
+  points.forEach((p) => {
+    const marker = L.marker([p.lat, p.lon]).addTo(map).bindPopup(`${p.label} (${p.method})`);
+    markers.push(marker);
+  });
+
+  const group = L.featureGroup(markers);
+  map.fitBounds(group.getBounds().pad(0.2));
+}
 
 async function refreshCaseData(caseId) {
   const [summaryRes, graphRes] = await Promise.all([
@@ -33,12 +54,7 @@ async function refreshCaseData(caseId) {
   if (graphRes.ok) {
     const graphData = await graphRes.json();
     graphBox.textContent = JSON.stringify(graphData, null, 2);
-    graphData.nodes
-      .filter((n) => n.type === 'Location')
-      .forEach((n) => {
-        const c = locationCoords[n.label];
-        if (c) L.marker(c).addTo(map).bindPopup(n.label);
-      });
+    plotGraphLocations(graphData);
   }
 }
 

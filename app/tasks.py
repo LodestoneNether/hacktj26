@@ -18,6 +18,8 @@ def investigate_case_task(job_id: str, case_id: str, image_content: bytes | None
         job.findings = {
             'usernames': findings['usernames'],
             'emails': findings['emails'],
+            'similar_accounts': findings['similar_accounts'],
+            'known_accounts': findings['known_accounts'],
             'image': findings['image'],
             'graph': findings['graph'],
         }

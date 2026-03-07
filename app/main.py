@@ -9,6 +9,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
 
 from app.auth import create_access_token, get_password_hash, require_roles, verify_password
 from app.db import Base, SessionLocal, active_database_url, engine, get_db
@@ -30,9 +31,20 @@ app.mount('/static', StaticFiles(directory='app/static'), name='static')
 templates = Jinja2Templates(directory='app/templates')
 
 
+def ensure_schema_compatibility() -> None:
+    inspector = inspect(engine)
+    if 'cases' not in inspector.get_table_names():
+        return
+    cols = {c['name'] for c in inspector.get_columns('cases')}
+    if 'known_accounts_csv' not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE cases ADD COLUMN known_accounts_csv TEXT DEFAULT ''"))
+
+
 @app.on_event('startup')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility()
     db = SessionLocal()
     try:
         admin = db.query(User).filter(User.email == 'admin@local').first()
@@ -73,6 +85,7 @@ def create_case(
     notes: str = Form(''),
     usernames: str = Form(''),
     emails: str = Form(''),
+    known_accounts: str = Form(''),
     legal_basis: str = Form(...),
     purpose: str = Form(...),
     consent_for_face_matching: bool = Form(False),
@@ -90,6 +103,7 @@ def create_case(
         consent_for_face_matching=consent_for_face_matching,
         usernames_csv=usernames,
         emails_csv=emails,
+        known_accounts_csv=known_accounts,
         created_at=utcnow(),
         created_by=user.id,
     )
