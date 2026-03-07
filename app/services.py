@@ -277,12 +277,26 @@ def similar_accounts_ai(usernames: list[str], known_accounts: list[str]) -> list
                         'judgment': 'high_match' if score >= 0.75 else 'possible_match' if score >= 0.5 else 'low_match',
                     }
                 )
+
     dedup: dict[tuple[str, str], dict[str, Any]] = {}
     for c in candidates:
         key = (c['platform'], c['handle'])
         if key not in dedup or c['similarity_score'] > dedup[key]['similarity_score']:
             dedup[key] = c
-    return sorted(dedup.values(), key=lambda x: x['similarity_score'], reverse=True)[:60]
+
+    ranked = sorted(dedup.values(), key=lambda x: x['similarity_score'], reverse=True)[:80]
+    existing: list[dict[str, Any]] = []
+    with httpx.Client(timeout=settings.osint_http_timeout_s, follow_redirects=True) as client:
+        for c in ranked:
+            try:
+                r = client.get(c['url'])
+                if r.status_code < 400:
+                    c['exists'] = True
+                    existing.append(c)
+            except Exception:
+                continue
+
+    return existing[:60]
 
 
 def run_image_analysis(image_content: bytes | None, consent_for_face_matching: bool) -> dict[str, Any]:

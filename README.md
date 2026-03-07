@@ -109,4 +109,5 @@ If `celery -A app.celery_app.celery worker -l info` fails with `Cannot connect t
 - **Image location identification** now combines EXIF geotags, reverse-image style match hints, and lightweight AI geolocation inference; resulting coordinates are graphed on the map.
 - **Email enrichment** now captures MX/TXT/SPF/DMARC signals, gravatar presence, possible usernames, and deterministic breach-signal hints for deeper lookup context.
 - **Username similarity AI** now generates candidate similar accounts from username variants and scores/judges each candidate (`high_match`, `possible_match`, `low_match`).
+- **Existing-account filter** now verifies candidate profile URLs and removes accounts that do not appear to exist before returning results.
 - **Known account baseline input** is available in case creation and is used to guide similarity scoring.

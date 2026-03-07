@@ -58,7 +58,7 @@ def test_case_creation_and_investigation(monkeypatch) -> None:
         services,
         'similar_accounts_ai',
         lambda usernames, known: [
-            {'platform': 'instagram', 'handle': 'aliceofficial', 'url': 'u', 'similarity_score': 0.91, 'judgment': 'high_match'}
+            {'platform': 'instagram', 'handle': 'aliceofficial', 'url': 'u', 'similarity_score': 0.91, 'judgment': 'high_match', 'exists': True}
         ],
     )
     monkeypatch.setattr(services, 'persist_graph_neo4j', lambda case_id, graph: None)
