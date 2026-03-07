@@ -13,6 +13,8 @@ This version implements the requested upgrades for the web stack:
 
 - **API/Web:** FastAPI + Jinja templates + vanilla JS
 - **Relational DB:** PostgreSQL via SQLAlchemy models (`users`, `cases`, `jobs`, `audit_logs`)
+
+> If PostgreSQL is not reachable at startup, the app now automatically falls back to local SQLite (`sqlite:///./osint.db`) so `uvicorn app.main:app --reload` can still start for local development.
 - **Graph DB:** Neo4j persistence for entity graph nodes/relationships
 - **Workers:** Celery (`jobs.investigate_case`) with Redis broker/backend
 - **Security:** OAuth2 password flow (JWT), role-based dependencies (`admin`, `investigator`, `viewer`)

@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.auth import create_access_token, get_password_hash, require_roles, verify_password
-from app.db import Base, engine, get_db
+from app.db import Base, SessionLocal, active_database_url, engine, get_db
 from app.models import Case, Job, Role, User
 from app.services import create_case_id, create_job_id, log_audit, utcnow
 from app.tasks import investigate_case_task
@@ -32,12 +32,15 @@ templates = Jinja2Templates(directory='app/templates')
 @app.on_event('startup')
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
-    db = next(get_db())
-    admin = db.query(User).filter(User.email == 'admin@local').first()
-    if not admin:
-        db.add(User(email='admin@local', hashed_password=get_password_hash('admin123'), role=Role.admin))
-        db.commit()
-    db.close()
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.email == 'admin@local').first()
+        if not admin:
+            db.add(User(email='admin@local', hashed_password=get_password_hash('admin123'), role=Role.admin))
+            db.commit()
+        print(f'Active database URL: {active_database_url}')
+    finally:
+        db.close()
 
 
 @app.get('/', response_class=HTMLResponse)
