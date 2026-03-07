@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ case.title }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  </head>
+  <body>
+    <main class="container">
+      <a href="/">← Back to dashboard</a>
+      <h1>{{ case.title }}</h1>
+      <p>{{ case.notes }}</p>
+      <p><strong>Legal basis:</strong> {{ case.legal_basis }} | <strong>Purpose:</strong> {{ case.purpose }}</p>
+
+      <section class="card">
+        <h2>Run Investigation</h2>
+        <button id="run-btn" data-case-id="{{ case.id }}">Start Investigation</button>
+        <p id="job-status">{% if job %}Latest job: {{ job.status }}{% else %}No jobs yet.{% endif %}</p>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h3>AI Summary</h3>
+          <pre id="summary-box">{% if job and job.summary %}{{ job.summary }}{% else %}Run an investigation to generate a summary.{% endif %}</pre>
+        </article>
+        <article class="card">
+          <h3>Graph Snapshot</h3>
+          <pre id="graph-box">{% if job and job.findings and job.findings.get('graph') %}{{ job.findings.get('graph') | tojson(indent=2) }}{% else %}No graph yet.{% endif %}</pre>
+        </article>
+      </section>
+
+      <section class="card">
+        <h3>Geo Hints Map</h3>
+        <div id="map"></div>
+      </section>
+
+      <section class="card">
+        <h3>Evidence</h3>
+        <pre id="findings-box">{% if job and job.findings %}{{ job.findings | tojson(indent=2) }}{% else %}No findings yet.{% endif %}</pre>
+      </section>
+    </main>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/case.js"></script>
+  </body>
+</html>

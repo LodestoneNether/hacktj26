@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OSINT AI Investigator</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>OSINT AI Investigator — Secure Web</h1>
+      <p>RBAC + audit logging + PostgreSQL + Neo4j graph pipeline + Celery workers.</p>
+
+      <section class="card">
+        <h2>Auth</h2>
+        <form id="auth-form">
+          <label>Email<input name="username" value="admin@local" required /></label>
+          <label>Password<input name="password" value="admin123" type="password" required /></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <p id="auth-status"></p>
+      </section>
+
+      <section class="card">
+        <h2>New Investigation Case</h2>
+        <form id="case-form">
+          <label>Case title<input name="title" required /></label>
+          <label>Notes<textarea name="notes"></textarea></label>
+          <label>Usernames (comma-separated)<input name="usernames" placeholder="alice,bob" /></label>
+          <label>Emails (comma-separated)<input name="emails" placeholder="alice@example.com" /></label>
+          <label>Legal basis<input name="legal_basis" required placeholder="Consent / public interest" /></label>
+          <label>Purpose<input name="purpose" required placeholder="Missing persons investigation" /></label>
+          <label><input type="checkbox" name="consent_for_face_matching" /> Consent for face matching</label>
+          <label>Image evidence<input type="file" name="image" accept="image/*" /></label>
+          <button type="submit">Create Case</button>
+        </form>
+        <p id="create-status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Existing Cases</h2>
+        <ul>
+          {% for case in cases %}
+          <li><a href="/cases/{{ case.id }}">{{ case.title }}</a> <span class="muted">{{ case.created_at }}</span></li>
+          {% else %}
+          <li>No cases yet.</li>
+          {% endfor %}
+        </ul>
+      </section>
+    </main>
+    <script src="/static/main.js"></script>
+  </body>
+</html>
