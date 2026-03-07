@@ -75,14 +75,33 @@ def username_scan(usernames: list[str]) -> list[dict[str, Any]]:
         for platform in PLATFORMS:
             confidence = round((((seed + len(platform) * 17) % 100) / 100), 2)
             found = confidence > 0.35
-            rows.append(
-                {
-                    "username": username,
-                    "platform": platform,
-                    "found": found,
-                    "confidence": confidence,
-                    "url": f"https://{platform}.com/{username}" if found else None,
-                }
+            if platform=='reddit':
+                rows.append(
+                    {
+                        "username": username,
+                        "platform": platform,
+                        "found": found,
+                        "confidence": confidence,
+                        "url": f"https://{platform}.com/user/{username}" if found else None,
+                    }
+            elif platform in {'tiktok','medium','youtube'}:
+                rows.append(
+                    {
+                        "username": username,
+                        "platform": platform,
+                        "found": found,
+                        "confidence": confidence,
+                        "url": f"https://{platform}.com/@{username}" if found else None,
+                    }
+            else:
+                rows.append(
+                    {
+                        "username": username,
+                        "platform": platform,
+                        "found": found,
+                        "confidence": confidence,
+                        "url": f"https://{platform}.com/{username}" if found else None,
+                    }
             )
     return rows
 
