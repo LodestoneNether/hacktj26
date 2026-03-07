@@ -14,6 +14,7 @@ from app.auth import create_access_token, get_password_hash, require_roles, veri
 from app.db import Base, SessionLocal, active_database_url, engine, get_db
 from app.models import Case, Job, Role, User
 from app.services import create_case_id, create_job_id, log_audit, utcnow
+from app.config import settings
 from app.tasks import investigate_case_task
 
 app = FastAPI(title='OSINT AI Investigator - Productionized Web')
@@ -127,7 +128,14 @@ def investigate_case_endpoint(
     db.commit()
 
     payload = base64.b64decode(image_b64.encode()) if image_b64 else None
-    investigate_case_task.delay(jid, case_id, payload)
+    try:
+        if settings.celery_task_always_eager:
+            investigate_case_task(jid, case_id, payload)
+        else:
+            investigate_case_task.delay(jid, case_id, payload)
+    except Exception:
+        # Broker/worker unavailable: run inline so the investigation still completes.
+        investigate_case_task(jid, case_id, payload)
     log_audit(db, user.id, 'investigation_started', case_id=case_id, payload={'job_id': jid})
     return {'job_id': jid}
 

@@ -15,7 +15,12 @@ class Settings(BaseSettings):
 
     celery_broker_url: str = 'redis://localhost:6379/0'
     celery_result_backend: str = 'redis://localhost:6379/1'
-    celery_task_always_eager: bool = False
+    celery_task_always_eager: bool = True
+
+    osint_http_timeout_s: float = 1.5
+    osint_max_usernames_per_case: int = 20
+    osint_max_emails_per_case: int = 20
+    use_torch_embeddings: bool = False
 
     default_admin_email: str = 'admin@local'
     default_admin_password: str = 'admin123'

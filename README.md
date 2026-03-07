@@ -88,3 +88,10 @@ Tests use sqlite + Celery eager mode via env overrides and monkeypatch external 
 ```bash
 pytest -q
 ```
+
+## Investigation reliability/performance fixes
+
+- Investigations now complete even if Celery broker/worker is down: API falls back to inline execution.
+- Celery defaults to eager mode for local development (`CELERY_TASK_ALWAYS_EAGER=true`) to avoid jobs stuck in `running`.
+- OSINT adapters now use tighter timeouts and per-case caps for usernames/emails.
+- Torch embeddings are optional (`USE_TORCH_EMBEDDINGS=false` by default) to avoid long startup/download delays.

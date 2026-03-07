@@ -17,7 +17,7 @@ import torchvision.models as models
 import torchvision.transforms as T
 
 from app.config import settings
-from app.models import AuditLog, Case, Job
+from app.models import AuditLog, Case
 
 MODEL = None
 TRANSFORM = T.Compose([
@@ -52,7 +52,19 @@ def get_model() -> torch.nn.Module:
     return MODEL
 
 
+def _fast_embedding_from_pixels(content: bytes) -> list[float]:
+    image = Image.open(io.BytesIO(content)).convert('RGB').resize((32, 32))
+    arr = np.asarray(image, dtype=np.float32).reshape(-1)
+    # deterministic, light embedding for fast local runs
+    vec = arr[::8]
+    norm = np.linalg.norm(vec) or 1.0
+    return (vec / norm).astype(float).tolist()
+
+
 def embed_image_bytes(content: bytes) -> list[float]:
+    if not settings.use_torch_embeddings:
+        return _fast_embedding_from_pixels(content)
+
     image = Image.open(io.BytesIO(content)).convert('RGB')
     tensor = TRANSFORM(image).unsqueeze(0)
     with torch.no_grad():
@@ -73,7 +85,6 @@ def exif_geo(content: bytes) -> list[dict[str, Any]]:
     exif = image.getexif()
     if not exif:
         return []
-    # Minimal extraction of GPS keys if present
     tags = {ExifTags.TAGS.get(k, str(k)): v for k, v in exif.items()}
     gps = tags.get('GPSInfo')
     if gps:
@@ -83,8 +94,9 @@ def exif_geo(content: bytes) -> list[dict[str, Any]]:
 
 def username_adapter(usernames: list[str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    with httpx.Client(timeout=5.0, follow_redirects=True) as client:
-        for username in usernames:
+    truncated = usernames[: settings.osint_max_usernames_per_case]
+    with httpx.Client(timeout=settings.osint_http_timeout_s, follow_redirects=True) as client:
+        for username in truncated:
             for platform, template in PLATFORMS.items():
                 url = template.format(username=username)
                 try:
@@ -100,11 +112,13 @@ def username_adapter(usernames: list[str]) -> list[dict[str, Any]]:
 
 def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
     out = []
-    for email in emails:
+    for email in emails[: settings.osint_max_emails_per_case]:
         domain = email.split('@')[-1] if '@' in email else 'invalid'
         mx_records = []
         try:
-            answers = dns.resolver.resolve(domain, 'MX')
+            resolver = dns.resolver.Resolver()
+            resolver.lifetime = settings.osint_http_timeout_s
+            answers = resolver.resolve(domain, 'MX')
             mx_records = [str(r.exchange).rstrip('.') for r in answers]
         except Exception:
             pass
