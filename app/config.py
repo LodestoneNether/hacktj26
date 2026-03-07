@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     algorithm: str = 'HS256'
     access_token_minutes: int = 60
 
-    celery_broker_url: str = 'redis://localhost:6379/0'
-    celery_result_backend: str = 'redis://localhost:6379/1'
+    # Default to local no-infra Celery transport so worker can start without Redis.
+    celery_broker_url: str = 'memory://'
+    celery_result_backend: str = 'cache+memory://'
     celery_task_always_eager: bool = True
 
     osint_http_timeout_s: float = 1.5

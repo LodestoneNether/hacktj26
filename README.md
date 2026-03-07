@@ -16,7 +16,7 @@ This version implements the requested upgrades for the web stack:
 
 > If PostgreSQL is not reachable at startup, the app now automatically falls back to local SQLite (`sqlite:///./osint.db`) so `uvicorn app.main:app --reload` can still start for local development.
 - **Graph DB:** Neo4j persistence for entity graph nodes/relationships
-- **Workers:** Celery (`jobs.investigate_case`) with Redis broker/backend
+- **Workers:** Celery (`jobs.investigate_case`) with local in-memory broker/backend by default (Redis optional)
 - **Security:** OAuth2 password flow (JWT), role-based dependencies (`admin`, `investigator`, `viewer`)
 - **Compliance:** Mandatory `legal_basis` + `purpose`; consent gate for face matching
 
@@ -63,6 +63,7 @@ export DATABASE_URL='postgresql+psycopg2://postgres:postgres@localhost:5432/osin
 export NEO4J_URI='bolt://localhost:7687'
 export NEO4J_USER='neo4j'
 export NEO4J_PASSWORD='password'
+# Optional for production; local defaults are memory:// and cache+memory://
 export CELERY_BROKER_URL='redis://localhost:6379/0'
 export CELERY_RESULT_BACKEND='redis://localhost:6379/1'
 ```
@@ -95,3 +96,9 @@ pytest -q
 - Celery defaults to eager mode for local development (`CELERY_TASK_ALWAYS_EAGER=true`) to avoid jobs stuck in `running`.
 - OSINT adapters now use tighter timeouts and per-case caps for usernames/emails.
 - Torch embeddings are optional (`USE_TORCH_EMBEDDINGS=false` by default) to avoid long startup/download delays.
+
+
+### Celery/Redis connection note
+If `celery -A app.celery_app.celery worker -l info` fails with `Cannot connect to redis://localhost:6379`, you can either:
+- run Redis and set `CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` to Redis, or
+- use the default local settings (no env override), which use `memory://` + `cache+memory://` and start without Redis.
