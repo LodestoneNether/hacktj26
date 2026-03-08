@@ -613,8 +613,8 @@ def investigate_case(db: Session, case: Case, image_contents: list[bytes]) -> di
     email_rows = email_adapter(emails)
 
     for email in emails:
-        username.append(email.split('@')[0])
-    username = list(set(username))
+        usernames.append(email.split('@')[0])
+    usernames = list(set(usernames))
     
     email_usernames = [
         candidate.strip()
