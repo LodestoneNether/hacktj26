@@ -115,3 +115,6 @@ If `celery -A app.celery_app.celery worker -l info` fails with `Cannot connect t
 - The case form now supports **multiple evidence images** per investigation run.
 - Known account baseline entries now capture **platform + username** (e.g. `instagram:alice`) to ground similarity scoring.
 - Username account findings now include **false-positive filtering** and explicit false-positive buckets.
+
+- Username lookups now use **social platform APIs** (GitHub API, Reddit API, X API when token is configured) instead of only direct profile scraping.
+- Case investigations now include an interactive **social web graph UI** with a toggle to include/exclude false-positive accounts.

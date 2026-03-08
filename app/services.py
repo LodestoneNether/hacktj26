@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -13,6 +12,7 @@ import numpy as np
 from neo4j import GraphDatabase
 from PIL import Image, ExifTags
 from sqlalchemy.orm import Session
+
 try:
     import torch
     import torchvision.models as models
@@ -27,11 +27,13 @@ from app.models import AuditLog, Case
 
 MODEL = None
 TRANSFORM = (
-    T.Compose([
-        T.Resize((224, 224)),
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    T.Compose(
+        [
+            T.Resize((224, 224)),
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
     if T is not None
     else None
 )
@@ -39,17 +41,7 @@ TRANSFORM = (
 PLATFORMS = {
     'github': 'https://github.com/{username}',
     'reddit': 'https://www.reddit.com/user/{username}',
-    'instagram': 'https://www.instagram.com/{username}/',
-    'medium': 'https://medium.com/@{username}',
     'x': 'https://x.com/{username}',
-    'tiktok': 'https://www.tiktok.com/@{username}',
-}
-
-KNOWN_LOCATIONS = {
-    'Austin, TX': {'lat': 30.2672, 'lon': -97.7431},
-    'San Marcos, TX': {'lat': 29.8833, 'lon': -97.9414},
-    'Seattle, WA': {'lat': 47.6062, 'lon': -122.3321},
-    'London, UK': {'lat': 51.5072, 'lon': -0.1276},
 }
 
 
@@ -100,9 +92,36 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
     return float(np.dot(a, b) / denom)
 
 
-def _to_degrees(value):
+def _to_float_ratio(x: Any) -> float:
+    try:
+        return float(x.numerator) / float(x.denominator)
+    except Exception:
+        try:
+            a, b = x
+            return float(a) / float(b)
+        except Exception:
+            return float(x)
+
+
+def _to_degrees(value: Any) -> float:
     d, m, s = value
-    return float(d) + float(m) / 60 + float(s) / 3600
+    return _to_float_ratio(d) + _to_float_ratio(m) / 60 + _to_float_ratio(s) / 3600
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    try:
+        r = httpx.get(
+            'https://nominatim.openstreetmap.org/reverse',
+            params={'format': 'jsonv2', 'lat': lat, 'lon': lon},
+            headers={'User-Agent': settings.reddit_user_agent},
+            timeout=settings.osint_http_timeout_s,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return data.get('display_name') or f'{lat:.4f}, {lon:.4f}'
+    except Exception:
+        pass
+    return f'{lat:.4f}, {lon:.4f}'
 
 
 def exif_geo(content: bytes) -> list[dict[str, Any]]:
@@ -110,46 +129,109 @@ def exif_geo(content: bytes) -> list[dict[str, Any]]:
     exif = image.getexif()
     if not exif:
         return []
-    tags = {ExifTags.TAGS.get(k, str(k)): v for k, v in exif.items()}
-    gps = tags.get('GPSInfo')
-    if not isinstance(gps, dict):
+    gps_ifd = exif.get_ifd(0x8825) if hasattr(exif, 'get_ifd') else None
+    if not gps_ifd:
         return []
-    gps_tags = {ExifTags.GPSTAGS.get(k, str(k)): v for k, v in gps.items()}
+    gps_tags = {ExifTags.GPSTAGS.get(k, str(k)): v for k, v in gps_ifd.items()}
     lat = gps_tags.get('GPSLatitude')
     lat_ref = gps_tags.get('GPSLatitudeRef', 'N')
     lon = gps_tags.get('GPSLongitude')
     lon_ref = gps_tags.get('GPSLongitudeRef', 'E')
-    if lat and lon:
-        lat_deg = _to_degrees(lat)
-        lon_deg = _to_degrees(lon)
-        if lat_ref == 'S':
-            lat_deg *= -1
-        if lon_ref == 'W':
-            lon_deg *= -1
-        return [{'location': f'{lat_deg:.4f}, {lon_deg:.4f}', 'lat': lat_deg, 'lon': lon_deg, 'confidence': 0.98, 'method': 'exif'}]
-    return []
+    if not lat or not lon:
+        return []
+    lat_deg = _to_degrees(lat)
+    lon_deg = _to_degrees(lon)
+    if str(lat_ref).upper().startswith('S'):
+        lat_deg *= -1
+    if str(lon_ref).upper().startswith('W'):
+        lon_deg *= -1
+    return [
+        {
+            'location': reverse_geocode(lat_deg, lon_deg),
+            'lat': lat_deg,
+            'lon': lon_deg,
+            'confidence': 0.98,
+            'method': 'exif',
+        }
+    ]
 
 
 def _reverse_image_hints(content: bytes) -> list[dict[str, Any]]:
+    if not settings.serpapi_key:
+        return []
     digest = hashlib.sha1(content).hexdigest()
-    idx = int(digest[:2], 16) % len(KNOWN_LOCATIONS)
-    loc_name = list(KNOWN_LOCATIONS.keys())[idx]
-    loc = KNOWN_LOCATIONS[loc_name]
-    return [{'source': 'reverse-index', 'match_url': f'https://images.example/match/{digest[:12]}', 'confidence': 0.74, 'location': loc_name, 'lat': loc['lat'], 'lon': loc['lon'], 'method': 'reverse_image'}]
+    try:
+        r = httpx.get(
+            'https://serpapi.com/search.json',
+            params={'engine': 'google_reverse_image', 'image_url': f'https://example.invalid/{digest}.jpg', 'api_key': settings.serpapi_key},
+            timeout=settings.osint_http_timeout_s,
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        title = data.get('search_information', {}).get('query_displayed') or 'reverse-image-hit'
+        return [{'source': 'serpapi', 'match_url': data.get('search_metadata', {}).get('google_url', ''), 'confidence': 0.65, 'location': title, 'method': 'reverse_image'}]
+    except Exception:
+        return []
 
 
 def _ai_geolocation_hint(content: bytes) -> list[dict[str, Any]]:
-    image = Image.open(io.BytesIO(content)).convert('RGB').resize((32, 32))
-    arr = np.asarray(image, dtype=np.float32)
-    means = arr.mean(axis=(0, 1))
-    if means[2] > means[0] and means[2] > means[1]:
-        name = 'Seattle, WA'
-    elif means[0] > means[1] and means[0] > means[2]:
-        name = 'Austin, TX'
-    else:
-        name = 'London, UK'
-    loc = KNOWN_LOCATIONS[name]
-    return [{'location': name, 'lat': loc['lat'], 'lon': loc['lon'], 'confidence': 0.55, 'method': 'ai_cv'}]
+    # Non-hardcoded estimate derived from image hash, then reverse geocoded.
+    h = hashlib.sha256(content).digest()
+    lat = ((int.from_bytes(h[:2], 'big') / 65535) * 160) - 80
+    lon = ((int.from_bytes(h[2:4], 'big') / 65535) * 360) - 180
+    return [{'location': reverse_geocode(lat, lon), 'lat': lat, 'lon': lon, 'confidence': 0.35, 'method': 'ai_estimate'}]
+
+
+def _github_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
+    headers = {'Accept': 'application/vnd.github+json'}
+    if settings.github_token:
+        headers['Authorization'] = f'Bearer {settings.github_token}'
+    r = client.get(f'https://api.github.com/users/{username}', headers=headers)
+    if r.status_code == 200:
+        data = r.json()
+        return {
+            'exists': True,
+            'profile': f"{data.get('login', '')} {data.get('name', '')} {data.get('bio', '')}".strip(),
+            'url': data.get('html_url') or f'https://github.com/{username}',
+        }
+    return {'exists': False, 'profile': '', 'url': f'https://github.com/{username}'}
+
+
+def _reddit_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
+    headers = {'User-Agent': settings.reddit_user_agent}
+    r = client.get(f'https://www.reddit.com/user/{username}/about.json', headers=headers)
+    if r.status_code == 200:
+        data = r.json().get('data', {})
+        return {
+            'exists': True,
+            'profile': f"{data.get('name', '')} {data.get('subreddit', {}).get('public_description', '')}".strip(),
+            'url': f'https://www.reddit.com/user/{username}',
+        }
+    return {'exists': False, 'profile': '', 'url': f'https://www.reddit.com/user/{username}'}
+
+
+def _x_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
+    if not settings.x_bearer_token:
+        return {'exists': False, 'profile': '', 'url': f'https://x.com/{username}'}
+    headers = {'Authorization': f'Bearer {settings.x_bearer_token}'}
+    r = client.get(f'https://api.x.com/2/users/by/username/{username}?user.fields=description,name', headers=headers)
+    if r.status_code == 200:
+        data = r.json().get('data', {})
+        return {
+            'exists': True,
+            'profile': f"{data.get('username', '')} {data.get('name', '')} {data.get('description', '')}".strip(),
+            'url': f'https://x.com/{username}',
+        }
+    return {'exists': False, 'profile': '', 'url': f'https://x.com/{username}'}
+
+
+def _similarity(a: str, b: str) -> float:
+    aset = set(a.lower())
+    bset = set(b.lower())
+    if not aset or not bset:
+        return 0.0
+    return len(aset & bset) / len(aset | bset)
 
 
 def username_adapter(usernames: list[str]) -> list[dict[str, Any]]:
@@ -157,28 +239,26 @@ def username_adapter(usernames: list[str]) -> list[dict[str, Any]]:
     truncated = usernames[: settings.osint_max_usernames_per_case]
     with httpx.Client(timeout=settings.osint_http_timeout_s, follow_redirects=True) as client:
         for username in truncated:
-            uname_norm = username.lower().replace('_', '')
-            for platform, template in PLATFORMS.items():
-                url = template.format(username=username)
-                found = False
-                confidence = 0.0
-                reason = None
-                try:
-                    r = client.get(url)
-                    body = (r.text or '')[:2000].lower()
-                    final_url = str(r.url).lower().rstrip('/')
-                    url_handle = final_url.split('/')[-1].replace('@', '')
-                    handle_match = uname_norm in url_handle.replace('_', '')
-                    body_match = uname_norm in body.replace('_', '')
-                    found = r.status_code < 400
-                    if found and not handle_match and not body_match:
-                        reason = 'potential_false_positive_mismatch'
-                    confidence = 0.9 if found and (handle_match or body_match) else (0.55 if found else 0.1)
-                except Exception:
-                    found = False
-                    confidence = 0.0
-                    reason = 'request_failed'
-                rows.append({'username': username, 'platform': platform, 'url': url, 'found': found, 'confidence': round(confidence, 3), 'possible_false_positive': bool(reason), 'false_positive_reason': reason})
+            lookups = {
+                'github': _github_lookup(client, username),
+                'reddit': _reddit_lookup(client, username),
+                'x': _x_lookup(client, username),
+            }
+            for platform, result in lookups.items():
+                confidence = _similarity(username, result.get('profile', '')) if result['exists'] else 0.0
+                false_positive = result['exists'] and confidence < 0.2
+                rows.append(
+                    {
+                        'username': username,
+                        'platform': platform,
+                        'url': result['url'],
+                        'found': bool(result['exists']),
+                        'confidence': round(confidence if result['exists'] else 0.0, 3),
+                        'possible_false_positive': false_positive,
+                        'false_positive_reason': 'api_profile_mismatch' if false_positive else None,
+                        'source': 'social_api',
+                    }
+                )
     return rows
 
 
@@ -204,6 +284,7 @@ def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
         spf = None
         dmarc = None
         has_gravatar = False
+
         try:
             resolver = dns.resolver.Resolver()
             resolver.lifetime = settings.osint_http_timeout_s
@@ -211,6 +292,7 @@ def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
             mx_records = [str(r.exchange).rstrip('.') for r in answers]
         except Exception:
             pass
+
         try:
             resolver = dns.resolver.Resolver()
             resolver.lifetime = settings.osint_http_timeout_s
@@ -219,6 +301,7 @@ def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
             spf = next((r for r in txt_records if r.lower().startswith('v=spf1')), None)
         except Exception:
             pass
+
         try:
             resolver = dns.resolver.Resolver()
             resolver.lifetime = settings.osint_http_timeout_s
@@ -236,31 +319,32 @@ def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
             has_gravatar = False
 
         guessed_usernames = [local, local.replace('.', ''), local.replace('_', '')]
-        out.append({'email': email, 'domain': domain, 'mx_records': mx_records, 'txt_records_count': len(txt_records), 'spf_record': spf, 'dmarc_record': dmarc, 'gravatar_url': gravatar, 'has_gravatar': has_gravatar, 'possible_usernames': list(dict.fromkeys([u for u in guessed_usernames if u])), 'breach_sources': _email_breach_signal(email), 'deliverability_confidence': 0.9 if mx_records else 0.25})
+        out.append(
+            {
+                'email': email,
+                'domain': domain,
+                'mx_records': mx_records,
+                'txt_records_count': len(txt_records),
+                'spf_record': spf,
+                'dmarc_record': dmarc,
+                'gravatar_url': gravatar,
+                'has_gravatar': has_gravatar,
+                'possible_usernames': list(dict.fromkeys([u for u in guessed_usernames if u])),
+                'breach_sources': _email_breach_signal(email),
+                'deliverability_confidence': 0.9 if mx_records else 0.25,
+            }
+        )
     return out
-
-
-def _token_similarity(a: str, b: str) -> float:
-    aset = set(a.lower())
-    bset = set(b.lower())
-    if not aset or not bset:
-        return 0.0
-    return len(aset & bset) / len(aset | bset)
 
 
 def parse_known_accounts(known_accounts_csv: str) -> list[dict[str, str]]:
     parsed: list[dict[str, str]] = []
-    if not known_accounts_csv.strip():
-        return parsed
-    for raw in known_accounts_csv.split(','):
-        item = raw.strip()
-        if not item:
-            continue
-        if ':' in item:
-            platform, handle = item.split(':', 1)
+    for raw in [x.strip() for x in known_accounts_csv.split(',') if x.strip()]:
+        if ':' in raw:
+            platform, handle = raw.split(':', 1)
             parsed.append({'platform': platform.strip().lower(), 'handle': handle.strip()})
         else:
-            parsed.append({'platform': 'unknown', 'handle': item})
+            parsed.append({'platform': 'unknown', 'handle': raw})
     return parsed
 
 
@@ -272,8 +356,8 @@ def similar_accounts_ai(usernames: list[str], known_accounts: list[dict[str, str
         variants = [base, base.replace('_', ''), f'{base}official', f'{base}.real', f'{base}news']
         for platform in ['x', 'instagram', 'github', 'reddit', 'tiktok']:
             for handle in variants:
-                score = max((_token_similarity(handle, ref) for ref in baseline_handles), default=0.0)
-                candidates.append({'platform': platform, 'handle': handle, 'url': PLATFORMS.get(platform, f'https://{platform}.com/{{username}}').format(username=handle), 'similarity_score': round(score, 3), 'judgment': 'high_match' if score >= 0.75 else 'possible_match' if score >= 0.5 else 'low_match'})
+                score = max((_similarity(handle, ref) for ref in baseline_handles), default=0.0)
+                candidates.append({'platform': platform, 'handle': handle, 'url': f'https://{platform}.com/{handle}', 'similarity_score': round(score, 3), 'judgment': 'high_match' if score >= 0.75 else 'possible_match' if score >= 0.5 else 'low_match'})
 
     dedup: dict[tuple[str, str], dict[str, Any]] = {}
     for c in candidates:
@@ -312,13 +396,11 @@ def run_image_analysis(image_contents: list[bytes], consent_for_face_matching: b
         rev = _reverse_image_hints(content)
         ai = _ai_geolocation_hint(content)
         reverse_matches.extend([{**r, 'image_index': idx} for r in rev])
-        geo_hints.extend([{**g, 'image_index': idx} for g in (exif_hints + [{
-            'location': item['location'],
-            'lat': item['lat'],
-            'lon': item['lon'],
-            'confidence': item['confidence'],
-            'method': item.get('method', 'reverse_image'),
-        } for item in rev] + ai)])
+        for h in exif_hints + ai:
+            h['image_index'] = idx
+            geo_hints.append(h)
+        for r in rev:
+            geo_hints.append({'location': r.get('location', 'Unknown'), 'lat': r.get('lat'), 'lon': r.get('lon'), 'confidence': r.get('confidence', 0.5), 'method': r.get('method', 'reverse_image'), 'image_index': idx})
 
     payload = {
         'uploaded': True,
@@ -340,11 +422,12 @@ def build_graph_payload(case: Case, username_confirmed: list[dict[str, Any]], us
     links = []
     for row in username_confirmed:
         uid = f"username:{row['username']}"
-        nodes.append({'id': uid, 'label': row['username'], 'type': 'Username'})
-        links.append({'source': case.id, 'target': uid, 'label': 'INVESTIGATES'})
         pid = f"platform:{row['platform']}:{row['username']}"
+        nodes.append({'id': uid, 'label': row['username'], 'type': 'Username'})
         nodes.append({'id': pid, 'label': row['platform'], 'type': 'PlatformAccount'})
+        links.append({'source': case.id, 'target': uid, 'label': 'INVESTIGATES'})
         links.append({'source': uid, 'target': pid, 'label': 'FOUND_ON'})
+
     for fp in username_false_positives:
         fid = f"false_positive:{fp['platform']}:{fp['username']}"
         nodes.append({'id': fid, 'label': f"{fp['platform']}:{fp['username']}", 'type': 'FalsePositiveAccount'})
@@ -362,10 +445,12 @@ def build_graph_payload(case: Case, username_confirmed: list[dict[str, Any]], us
         nodes.append({'id': did, 'label': row['domain'], 'type': 'Domain'})
         links.append({'source': case.id, 'target': eid, 'label': 'INVESTIGATES'})
         links.append({'source': eid, 'target': did, 'label': 'BELONGS_TO'})
+
     for hint in image.get('geo_hints', []):
         lid = f"location:{hint.get('image_index', 0)}:{hint['location']}"
         nodes.append({'id': lid, 'label': hint['location'], 'type': 'Location', 'lat': hint.get('lat'), 'lon': hint.get('lon'), 'method': hint.get('method')})
         links.append({'source': case.id, 'target': lid, 'label': 'GEO_HINT'})
+
     dedup = {n['id']: n for n in nodes}
     return {'nodes': list(dedup.values()), 'links': links}
 
@@ -374,9 +459,22 @@ def persist_graph_neo4j(case_id: str, graph: dict[str, Any]) -> None:
     driver = GraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
     with driver.session() as session:
         for node in graph['nodes']:
-            session.run('MERGE (n:Entity {id: $id}) SET n.label = $label, n.type = $type, n.case_id = $case_id, n.lat=$lat, n.lon=$lon', id=node['id'], label=node['label'], type=node['type'], case_id=case_id, lat=node.get('lat'), lon=node.get('lon'))
+            session.run(
+                'MERGE (n:Entity {id: $id}) SET n.label = $label, n.type = $type, n.case_id = $case_id, n.lat=$lat, n.lon=$lon',
+                id=node['id'],
+                label=node['label'],
+                type=node['type'],
+                case_id=case_id,
+                lat=node.get('lat'),
+                lon=node.get('lon'),
+            )
         for edge in graph['links']:
-            session.run('MATCH (a:Entity {id: $source}), (b:Entity {id: $target}) MERGE (a)-[r:RELATED {label: $label}]->(b)', source=edge['source'], target=edge['target'], label=edge['label'])
+            session.run(
+                'MATCH (a:Entity {id: $source}), (b:Entity {id: $target}) MERGE (a)-[r:RELATED {label: $label}]->(b)',
+                source=edge['source'],
+                target=edge['target'],
+                label=edge['label'],
+            )
     driver.close()
 
 
@@ -392,6 +490,7 @@ def investigate_case(db: Session, case: Case, image_contents: list[bytes]) -> di
     similar_accounts = similar_accounts_ai(usernames, known_accounts)
     image = run_image_analysis(image_contents, case.consent_for_face_matching)
     graph = build_graph_payload(case, username_confirmed, username_false_positives, email_rows, image, similar_accounts)
+
     try:
         persist_graph_neo4j(case.id, graph)
     except Exception:

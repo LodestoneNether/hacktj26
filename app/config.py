@@ -13,15 +13,22 @@ class Settings(BaseSettings):
     algorithm: str = 'HS256'
     access_token_minutes: int = 60
 
-    # Default to local no-infra Celery transport so worker can start without Redis.
     celery_broker_url: str = 'memory://'
     celery_result_backend: str = 'cache+memory://'
     celery_task_always_eager: bool = True
 
-    osint_http_timeout_s: float = 1.5
+    osint_http_timeout_s: float = 2.0
     osint_max_usernames_per_case: int = 20
     osint_max_emails_per_case: int = 20
     use_torch_embeddings: bool = False
+
+    # API-based account lookup credentials (optional)
+    github_token: str | None = None
+    reddit_user_agent: str = 'osint-investigator/1.0'
+    x_bearer_token: str | None = None
+
+    # Optional reverse-image provider hooks
+    serpapi_key: str | None = None
 
     default_admin_email: str = 'admin@local'
     default_admin_password: str = 'admin123'
