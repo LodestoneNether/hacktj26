@@ -63,7 +63,6 @@ export DATABASE_URL='postgresql+psycopg2://postgres:postgres@localhost:5432/osin
 export NEO4J_URI='bolt://localhost:7687'
 export NEO4J_USER='neo4j'
 export NEO4J_PASSWORD='password'
-# Optional for production; local defaults are memory:// and cache+memory://
 export CELERY_BROKER_URL='redis://localhost:6379/0'
 export CELERY_RESULT_BACKEND='redis://localhost:6379/1'
 ```
