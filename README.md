@@ -1,4 +1,4 @@
-# OSINT AI Investigator — Web Platform (Productionized MVP)
+# OSINT AI Investigator
 
 This version implements the requested upgrades for the web stack:
 - PostgreSQL-backed persistence
