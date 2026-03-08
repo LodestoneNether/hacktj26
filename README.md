@@ -111,3 +111,7 @@ If `celery -A app.celery_app.celery worker -l info` fails with `Cannot connect t
 - **Username similarity AI** now generates candidate similar accounts from username variants and scores/judges each candidate (`high_match`, `possible_match`, `low_match`).
 - **Existing-account filter** now verifies candidate profile URLs and removes accounts that do not appear to exist before returning results.
 - **Known account baseline input** is available in case creation and is used to guide similarity scoring.
+
+- The case form now supports **multiple evidence images** per investigation run.
+- Known account baseline entries now capture **platform + username** (e.g. `instagram:alice`) to ground similarity scoring.
+- Username account findings now include **false-positive filtering** and explicit false-positive buckets.

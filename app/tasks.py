@@ -7,16 +7,18 @@ from app.services import investigate_case
 
 
 @celery.task(name='jobs.investigate_case')
-def investigate_case_task(job_id: str, case_id: str, image_content: bytes | None = None) -> None:
+def investigate_case_task(job_id: str, case_id: str, image_contents: list[bytes] | None = None) -> None:
     db = SessionLocal()
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         case = db.query(Case).filter(Case.id == case_id).first()
         if not job or not case:
             return
-        findings = investigate_case(db, case, image_content)
+        findings = investigate_case(db, case, image_contents or [])
         job.findings = {
             'usernames': findings['usernames'],
+            'username_accounts_confirmed': findings['username_accounts_confirmed'],
+            'username_false_positives': findings['username_false_positives'],
             'emails': findings['emails'],
             'similar_accounts': findings['similar_accounts'],
             'known_accounts': findings['known_accounts'],

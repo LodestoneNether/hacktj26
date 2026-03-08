@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,7 +90,7 @@ def create_case(
     legal_basis: str = Form(...),
     purpose: str = Form(...),
     consent_for_face_matching: bool = Form(False),
-    image: UploadFile | None = File(None),
+    images: list[UploadFile] = File(default=[]),
     user: User = Depends(require_roles(Role.admin, Role.investigator)),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
@@ -111,24 +112,20 @@ def create_case(
     db.commit()
     log_audit(db, user.id, 'case_created', case_id=cid, payload={'title': title})
 
-    if image:
-        content = awaitable_read(image)
-        encoded = base64.b64encode(content).decode()
-        log_audit(db, user.id, 'image_uploaded', case_id=cid, payload={'size': len(content)})
-    else:
-        encoded = ''
+    encoded_images: list[str] = []
+    for image in images:
+        content = image.file.read()
+        if content:
+            encoded_images.append(base64.b64encode(content).decode())
+            log_audit(db, user.id, 'image_uploaded', case_id=cid, payload={'size': len(content), 'name': image.filename})
 
-    return {'case_id': cid, 'image_b64': encoded}
-
-
-def awaitable_read(file: UploadFile) -> bytes:
-    return file.file.read()
+    return {'case_id': cid, 'images_b64_json': json.dumps(encoded_images)}
 
 
 @app.post('/api/cases/{case_id}/investigate')
 def investigate_case_endpoint(
     case_id: str,
-    image_b64: str = Form(''),
+    images_b64_json: str = Form('[]'),
     user: User = Depends(require_roles(Role.admin, Role.investigator)),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
@@ -141,16 +138,23 @@ def investigate_case_endpoint(
     db.add(job)
     db.commit()
 
-    payload = base64.b64decode(image_b64.encode()) if image_b64 else None
+    try:
+        encoded_images = json.loads(images_b64_json or '[]')
+        if not isinstance(encoded_images, list):
+            encoded_images = []
+    except json.JSONDecodeError:
+        encoded_images = []
+
+    payloads = [base64.b64decode(item.encode()) for item in encoded_images if isinstance(item, str) and item]
+
     try:
         if settings.celery_task_always_eager:
-            investigate_case_task(jid, case_id, payload)
+            investigate_case_task(jid, case_id, payloads)
         else:
-            investigate_case_task.delay(jid, case_id, payload)
+            investigate_case_task.delay(jid, case_id, payloads)
     except Exception:
-        # Broker/worker unavailable: run inline so the investigation still completes.
-        investigate_case_task(jid, case_id, payload)
-    log_audit(db, user.id, 'investigation_started', case_id=case_id, payload={'job_id': jid})
+        investigate_case_task(jid, case_id, payloads)
+    log_audit(db, user.id, 'investigation_started', case_id=case_id, payload={'job_id': jid, 'images': len(payloads)})
     return {'job_id': jid}
 
 

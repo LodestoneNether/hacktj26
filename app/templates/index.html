@@ -28,11 +28,18 @@
           <label>Notes<textarea name="notes"></textarea></label>
           <label>Usernames (comma-separated)<input name="usernames" placeholder="alice,bob" /></label>
           <label>Emails (comma-separated)<input name="emails" placeholder="alice@example.com" /></label>
-          <label>Known reference accounts (comma-separated usernames)<input name="known_accounts" placeholder="aliceofficial,alice_news" /></label>
+
+          <div class="card">
+            <h3>Known account baseline (platform + username)</h3>
+            <div id="known-accounts-list"></div>
+            <button type="button" id="add-known-account">Add known account</button>
+            <input type="hidden" name="known_accounts" id="known-accounts-hidden" />
+          </div>
+
           <label>Legal basis<input name="legal_basis" required placeholder="Consent / public interest" /></label>
           <label>Purpose<input name="purpose" required placeholder="Missing persons investigation" /></label>
           <label><input type="checkbox" name="consent_for_face_matching" /> Consent for face matching</label>
-          <label>Image evidence<input type="file" name="image" accept="image/*" /></label>
+          <label>Evidence images<input type="file" name="images" accept="image/*" multiple /></label>
           <button type="submit">Create Case</button>
         </form>
         <p id="create-status"></p>

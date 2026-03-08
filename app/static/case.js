@@ -61,11 +61,11 @@ async function refreshCaseData(caseId) {
 if (runButton) {
   runButton.addEventListener('click', async () => {
     const caseId = runButton.dataset.caseId;
-    const imageB64 = sessionStorage.getItem(`case-image-${caseId}`) || '';
+    const imagesB64Json = sessionStorage.getItem(`case-images-${caseId}`) || '[]';
     statusLabel.textContent = 'Starting investigation...';
 
     const body = new FormData();
-    body.append('image_b64', imageB64);
+    body.append('images_b64_json', imagesB64Json);
 
     const jobRes = await fetch(`/api/cases/${caseId}/investigate`, {
       method: 'POST',
