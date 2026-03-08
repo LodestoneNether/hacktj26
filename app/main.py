@@ -31,6 +31,11 @@ app.add_middleware(
 app.mount('/static', StaticFiles(directory='app/static'), name='static')
 templates = Jinja2Templates(directory='app/templates')
 
+# Short-lived in-process storage for evidence images uploaded during case creation.
+# This avoids large base64 payloads in browser sessionStorage when multiple images
+# are attached before the investigation is started.
+CASE_IMAGE_CACHE: dict[str, list[str]] = {}
+
 
 def ensure_schema_compatibility() -> None:
     inspector = inspect(engine)
@@ -93,7 +98,7 @@ def create_case(
     images: list[UploadFile] = File(default=[]),
     user: User = Depends(require_roles(Role.admin, Role.investigator)),
     db: Session = Depends(get_db),
-) -> dict[str, str]:
+) -> dict[str, object]:
     cid = create_case_id()
     case = Case(
         id=cid,
@@ -119,7 +124,8 @@ def create_case(
             encoded_images.append(base64.b64encode(content).decode())
             log_audit(db, user.id, 'image_uploaded', case_id=cid, payload={'size': len(content), 'name': image.filename})
 
-    return {'case_id': cid, 'images_b64_json': json.dumps(encoded_images)}
+    CASE_IMAGE_CACHE[cid] = encoded_images
+    return {'case_id': cid, 'images_b64_json': '[]', 'image_count': len(encoded_images)}
 
 
 @app.post('/api/cases/{case_id}/investigate')
@@ -145,6 +151,8 @@ def investigate_case_endpoint(
     except json.JSONDecodeError:
         encoded_images = []
 
+    if not encoded_images:
+        encoded_images = CASE_IMAGE_CACHE.pop(case_id, [])
     payloads = [base64.b64decode(item.encode()) for item in encoded_images if isinstance(item, str) and item]
 
     try:

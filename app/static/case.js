@@ -135,11 +135,10 @@ if (confidenceSlider) {
 if (runButton) {
   runButton.addEventListener('click', async () => {
     const caseId = runButton.dataset.caseId;
-    const imagesB64Json = sessionStorage.getItem(`case-images-${caseId}`) || '[]';
     statusLabel.textContent = 'Starting investigation...';
 
     const body = new FormData();
-    body.append('images_b64_json', imagesB64Json);
+    body.append('images_b64_json', '[]');
 
     const jobRes = await fetch(`/api/cases/${caseId}/investigate`, {
       method: 'POST',
