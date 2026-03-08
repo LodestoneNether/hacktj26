@@ -118,7 +118,8 @@ if (caseForm) {
       return;
     }
     const data = await res.json();
-    sessionStorage.setItem(`case-images-${data.case_id}`, data.images_b64_json || '[]');
+    const queuedCount = Number(data.image_count || selectedFiles.length || 0);
+    if (imageStatus) imageStatus.textContent = `${queuedCount} image(s) uploaded.`;
     window.location.href = `/cases/${data.case_id}`;
   });
 }

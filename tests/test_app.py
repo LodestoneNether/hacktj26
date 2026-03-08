@@ -111,3 +111,82 @@ def test_case_creation_and_investigation(monkeypatch) -> None:
         summary = client.get(f'/api/cases/{case_id}/summary', headers=headers)
         assert summary.status_code == 200
         assert 'similar-account candidates' in summary.json()['summary']
+
+
+def test_multi_image_cache_and_gravatar_graph(monkeypatch) -> None:
+    captured = {'image_count': 0}
+
+    monkeypatch.setattr(services, 'username_adapter', lambda u: [])
+    monkeypatch.setattr(
+        services,
+        'email_adapter',
+        lambda e: [
+            {
+                'email': 'alice@gmail.com',
+                'domain': 'gmail.com',
+                'mx_records': ['mx.google.com'],
+                'txt_records_count': 1,
+                'spf_record': 'v=spf1 include:_spf.google.com ~all',
+                'dmarc_record': 'v=DMARC1; p=none',
+                'gravatar_url': 'https://www.gravatar.com/avatar/abc',
+                'has_gravatar': True,
+                'possible_usernames': ['alice'],
+                'breach_sources': [],
+                'deliverability_confidence': 0.9,
+            }
+        ],
+    )
+
+    def _image_analysis(contents, consent):
+        captured['image_count'] = len(contents)
+        return {'uploaded': bool(contents), 'image_count': len(contents), 'reverse_matches': [], 'geo_hints': []}
+
+    monkeypatch.setattr(services, 'run_image_analysis', _image_analysis)
+    monkeypatch.setattr(services, 'similar_accounts_ai', lambda usernames, known: [])
+    monkeypatch.setattr(services, 'persist_graph_neo4j', lambda case_id, graph: None)
+
+    with TestClient(app) as client:
+        auth = client.post(
+            '/api/auth/token',
+            data={'username': 'admin@local', 'password': 'admin123'},
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        headers = {'Authorization': f"Bearer {auth.json()['access_token']}"}
+
+        files = [
+            ('images', ('one.jpg', b'img1', 'image/jpeg')),
+            ('images', ('two.jpg', b'img2', 'image/jpeg')),
+        ]
+        create = client.post(
+            '/api/cases',
+            data={
+                'title': 'Cache test',
+                'notes': '',
+                'usernames': '',
+                'emails': 'alice@gmail.com',
+                'known_accounts': '',
+                'legal_basis': 'public interest',
+                'purpose': 'journalism',
+                'consent_for_face_matching': 'false',
+            },
+            files=files,
+            headers=headers,
+        )
+        assert create.status_code == 200
+        case_id = create.json()['case_id']
+
+        run = client.post(f'/api/cases/{case_id}/investigate', data={'images_b64_json': '[]'}, headers=headers)
+        assert run.status_code == 200
+        job_id = run.json()['job_id']
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            state = client.get(f'/api/jobs/{job_id}', headers=headers)
+            payload = state.json()
+            if payload['status'] == 'completed':
+                graph_types = {n['type'] for n in payload['findings']['graph']['nodes']}
+                assert 'Gravatar' in graph_types
+                break
+            time.sleep(0.2)
+
+        assert captured['image_count'] == 2

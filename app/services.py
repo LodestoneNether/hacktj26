@@ -342,6 +342,25 @@ def _email_breach_signal(email: str) -> list[str]:
     return [datasets[seed % len(datasets)]] if seed % 3 == 0 else []
 
 
+
+
+def _gravatar_profile_usernames(gravatar_hash: str) -> list[str]:
+    profile_url = f'https://www.gravatar.com/{gravatar_hash}.json'
+    try:
+        r = httpx.get(profile_url, timeout=settings.osint_http_timeout_s)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+    except Exception:
+        return []
+
+    entry = (data.get('entry') or [{}])[0]
+    candidates = [
+        entry.get('preferredUsername'),
+        entry.get('displayName'),
+    ]
+    return [c.strip() for c in candidates if isinstance(c, str) and c.strip()]
+
 def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
     out = []
     for email in emails[: settings.osint_max_emails_per_case]:
@@ -386,7 +405,16 @@ def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
         except Exception:
             has_gravatar = False
 
-        guessed_usernames = [local, local.replace('.', ''), local.replace('_', '')]
+        normalized_local = local.split('+', 1)[0] if domain.lower() in {'gmail.com', 'googlemail.com'} else local
+        guessed_usernames = [
+            local,
+            normalized_local,
+            local.replace('.', ''),
+            normalized_local.replace('.', ''),
+            local.replace('_', ''),
+        ]
+        gravatar_usernames = _gravatar_profile_usernames(gravatar_hash) if has_gravatar else []
+
         out.append(
             {
                 'email': email,
@@ -397,7 +425,7 @@ def email_adapter(emails: list[str]) -> list[dict[str, Any]]:
                 'dmarc_record': dmarc,
                 'gravatar_url': gravatar,
                 'has_gravatar': has_gravatar,
-                'possible_usernames': list(dict.fromkeys([u for u in guessed_usernames if u])),
+                'possible_usernames': list(dict.fromkeys([u for u in [*guessed_usernames, *gravatar_usernames] if u])),
                 'breach_sources': _email_breach_signal(email),
                 'deliverability_confidence': 0.9 if mx_records else 0.25,
             }
@@ -539,6 +567,11 @@ def build_graph_payload(case: Case, username_confirmed: list[dict[str, Any]], us
         nodes.append({'id': did, 'label': row['domain'], 'type': 'Domain'})
         links.append({'source': case.id, 'target': eid, 'label': 'INVESTIGATES'})
         links.append({'source': eid, 'target': did, 'label': 'BELONGS_TO'})
+
+        if row.get('has_gravatar') and row.get('gravatar_url'):
+            gid = f"gravatar:{row['email']}"
+            nodes.append({'id': gid, 'label': 'gravatar', 'type': 'Gravatar', 'url': row['gravatar_url']})
+            links.append({'source': eid, 'target': gid, 'label': 'HAS_GRAVATAR'})
 
     for hint in image.get('geo_hints', []):
         lid = f"location:{hint.get('image_index', 0)}:{hint['location']}"
