@@ -82,14 +82,6 @@ Default local admin:
 - Email: `admin@local`
 - Password: `admin123`
 
-## Testing
-
-Tests use sqlite + Celery eager mode via env overrides and monkeypatch external adapters.
-
-```bash
-pytest -q
-```
-
 ## Investigation reliability/performance fixes
 
 - Investigations now complete even if Celery broker/worker is down: API falls back to inline execution.
