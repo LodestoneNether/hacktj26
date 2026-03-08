@@ -114,7 +114,7 @@ def test_case_creation_and_investigation(monkeypatch) -> None:
 
 
 def test_multi_image_cache_and_gravatar_graph(monkeypatch) -> None:
-    captured = {'image_count': 0}
+    captured = {'image_count': 0, 'usernames': []}
 
     monkeypatch.setattr(services, 'username_adapter', lambda u: [])
     monkeypatch.setattr(
@@ -142,7 +142,11 @@ def test_multi_image_cache_and_gravatar_graph(monkeypatch) -> None:
         return {'uploaded': bool(contents), 'image_count': len(contents), 'reverse_matches': [], 'geo_hints': []}
 
     monkeypatch.setattr(services, 'run_image_analysis', _image_analysis)
-    monkeypatch.setattr(services, 'similar_accounts_ai', lambda usernames, known: [])
+    def _similar_accounts(usernames, known):
+        captured['usernames'] = usernames
+        return []
+
+    monkeypatch.setattr(services, 'similar_accounts_ai', _similar_accounts)
     monkeypatch.setattr(services, 'persist_graph_neo4j', lambda case_id, graph: None)
 
     with TestClient(app) as client:
@@ -190,3 +194,4 @@ def test_multi_image_cache_and_gravatar_graph(monkeypatch) -> None:
             time.sleep(0.2)
 
         assert captured['image_count'] == 2
+        assert captured['usernames'] == ['alice']
