@@ -612,6 +612,10 @@ def investigate_case(db: Session, case: Case, image_contents: list[bytes]) -> di
     known_accounts = parse_known_accounts(case.known_accounts_csv or '')
     email_rows = email_adapter(emails)
 
+    for email in emails:
+        username.append(email.split('@')[0])
+    username = list(set(username))
+    
     email_usernames = [
         candidate.strip()
         for email_row in email_rows
