@@ -79,7 +79,7 @@ def test_case_creation_and_investigation(monkeypatch) -> None:
                 'notes': 'investigate',
                 'usernames': 'alice',
                 'emails': 'alice@example.com',
-                'known_accounts': 'aliceofficial',
+                'known_accounts': 'instagram:aliceofficial',
                 'legal_basis': 'public interest',
                 'purpose': 'journalism',
                 'consent_for_face_matching': 'true',
@@ -89,7 +89,7 @@ def test_case_creation_and_investigation(monkeypatch) -> None:
         assert create.status_code == 200
         case_id = create.json()['case_id']
 
-        run = client.post(f'/api/cases/{case_id}/investigate', data={'image_b64': ''}, headers=headers)
+        run = client.post(f'/api/cases/{case_id}/investigate', data={'images_b64_json': '[]'}, headers=headers)
         assert run.status_code == 200
         job_id = run.json()['job_id']
 

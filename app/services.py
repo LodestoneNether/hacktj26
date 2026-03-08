@@ -38,11 +38,19 @@ TRANSFORM = (
     else None
 )
 
-PLATFORMS = {
+PLATFORM_URL_PATTERNS = {
     'github': 'https://github.com/{username}',
     'reddit': 'https://www.reddit.com/user/{username}',
     'x': 'https://x.com/{username}',
+    'instagram': 'https://www.instagram.com/{username}/',
+    'tiktok': 'https://www.tiktok.com/@{username}',
+    'medium': 'https://medium.com/@{username}',
 }
+
+
+def platform_profile_url(platform: str, username: str) -> str:
+    pattern = PLATFORM_URL_PATTERNS.get(platform, 'https://{platform}.com/{username}')
+    return pattern.format(platform=platform, username=username)
 
 
 def guardrails(case: Case) -> None:
@@ -193,9 +201,11 @@ def _github_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
         return {
             'exists': True,
             'profile': f"{data.get('login', '')} {data.get('name', '')} {data.get('bio', '')}".strip(),
-            'url': data.get('html_url') or f'https://github.com/{username}',
+            'url': data.get('html_url') or platform_profile_url('github', username),
+            'has_posts': (data.get('public_repos', 0) or 0) > 0,
+            'avatar_url': data.get('avatar_url'),
         }
-    return {'exists': False, 'profile': '', 'url': f'https://github.com/{username}'}
+    return {'exists': False, 'profile': '', 'url': platform_profile_url('github', username), 'has_posts': False, 'avatar_url': None}
 
 
 def _reddit_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
@@ -206,24 +216,53 @@ def _reddit_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
         return {
             'exists': True,
             'profile': f"{data.get('name', '')} {data.get('subreddit', {}).get('public_description', '')}".strip(),
-            'url': f'https://www.reddit.com/user/{username}',
+            'url': platform_profile_url('reddit', username),
+            'has_posts': (data.get('total_karma', 0) or 0) > 0,
+            'avatar_url': data.get('icon_img'),
         }
-    return {'exists': False, 'profile': '', 'url': f'https://www.reddit.com/user/{username}'}
+    return {'exists': False, 'profile': '', 'url': platform_profile_url('reddit', username), 'has_posts': False, 'avatar_url': None}
 
 
 def _x_lookup(client: httpx.Client, username: str) -> dict[str, Any]:
     if not settings.x_bearer_token:
-        return {'exists': False, 'profile': '', 'url': f'https://x.com/{username}'}
+        return {'exists': False, 'profile': '', 'url': platform_profile_url('x', username), 'has_posts': False, 'avatar_url': None}
     headers = {'Authorization': f'Bearer {settings.x_bearer_token}'}
-    r = client.get(f'https://api.x.com/2/users/by/username/{username}?user.fields=description,name', headers=headers)
+    r = client.get(
+        f'https://api.x.com/2/users/by/username/{username}?user.fields=description,name,profile_image_url,public_metrics',
+        headers=headers,
+    )
     if r.status_code == 200:
         data = r.json().get('data', {})
+        public = data.get('public_metrics') or {}
         return {
             'exists': True,
             'profile': f"{data.get('username', '')} {data.get('name', '')} {data.get('description', '')}".strip(),
-            'url': f'https://x.com/{username}',
+            'url': platform_profile_url('x', username),
+            'has_posts': (public.get('tweet_count', 0) or 0) > 0,
+            'avatar_url': data.get('profile_image_url'),
         }
-    return {'exists': False, 'profile': '', 'url': f'https://x.com/{username}'}
+    return {'exists': False, 'profile': '', 'url': platform_profile_url('x', username), 'has_posts': False, 'avatar_url': None}
+
+
+def _generic_profile_lookup(client: httpx.Client, platform: str, username: str) -> dict[str, Any]:
+    url = platform_profile_url(platform, username)
+    try:
+        response = client.get(url)
+        if response.status_code >= 400:
+            return {'exists': False, 'profile': '', 'url': url, 'has_posts': False, 'avatar_url': None}
+
+        html = response.text.lower()
+        has_posts = any(token in html for token in ['post', 'tweet', 'comment', 'video', 'article'])
+        has_avatar = any(token in html for token in ['avatar', 'profile picture', 'og:image'])
+        return {
+            'exists': True,
+            'profile': f'{platform} {username}',
+            'url': url,
+            'has_posts': has_posts,
+            'avatar_url': url if has_avatar else None,
+        }
+    except Exception:
+        return {'exists': False, 'profile': '', 'url': url, 'has_posts': False, 'avatar_url': None}
 
 
 def _similarity(a: str, b: str) -> float:
@@ -232,6 +271,22 @@ def _similarity(a: str, b: str) -> float:
     if not aset or not bset:
         return 0.0
     return len(aset & bset) / len(aset | bset)
+
+
+def _account_confidence(
+    username_similarity: float,
+    profile_similarity: float,
+    has_posts: bool,
+    avatar_similarity: float,
+) -> float:
+    # Dynamic score from multiple evidence checks (not a constant default).
+    weighted = (
+        0.35 * max(0.0, min(1.0, username_similarity))
+        + 0.3 * max(0.0, min(1.0, profile_similarity))
+        + 0.2 * (1.0 if has_posts else 0.0)
+        + 0.15 * max(0.0, min(1.0, avatar_similarity))
+    )
+    return round(weighted, 3)
 
 
 def username_adapter(usernames: list[str]) -> list[dict[str, Any]]:
@@ -243,17 +298,30 @@ def username_adapter(usernames: list[str]) -> list[dict[str, Any]]:
                 'github': _github_lookup(client, username),
                 'reddit': _reddit_lookup(client, username),
                 'x': _x_lookup(client, username),
+                'instagram': _generic_profile_lookup(client, 'instagram', username),
+                'tiktok': _generic_profile_lookup(client, 'tiktok', username),
+                'medium': _generic_profile_lookup(client, 'medium', username),
             }
             for platform, result in lookups.items():
-                confidence = _similarity(username, result.get('profile', '')) if result['exists'] else 0.0
-                false_positive = result['exists'] and confidence < 0.2
+                username_similarity = _similarity(username, result.get('url', '')) if result['exists'] else 0.0
+                profile_similarity = _similarity(username, result.get('profile', '')) if result['exists'] else 0.0
+                avatar_similarity = 0.5 if result.get('avatar_url') else 0.0
+                confidence = _account_confidence(username_similarity, profile_similarity, bool(result.get('has_posts')), avatar_similarity)
+                false_positive = result['exists'] and confidence < 0.45
                 rows.append(
                     {
                         'username': username,
                         'platform': platform,
                         'url': result['url'],
                         'found': bool(result['exists']),
-                        'confidence': round(confidence if result['exists'] else 0.0, 3),
+                        'confidence': confidence if result['exists'] else 0.0,
+                        'evidence_checks': {
+                            'exists': bool(result['exists']),
+                            'username_similarity': round(username_similarity, 3),
+                            'profile_similarity': round(profile_similarity, 3),
+                            'has_posts': bool(result.get('has_posts')),
+                            'profile_picture_similarity': round(avatar_similarity, 3),
+                        },
                         'possible_false_positive': false_positive,
                         'false_positive_reason': 'api_profile_mismatch' if false_positive else None,
                         'source': 'social_api',
@@ -352,12 +420,13 @@ def similar_accounts_ai(usernames: list[str], known_accounts: list[dict[str, str
     baseline_handles = [k['handle'] for k in known_accounts] or usernames
     seeds = usernames or baseline_handles
     candidates: list[dict[str, Any]] = []
+    known_by_platform = {(k['platform'], k['handle']): k for k in known_accounts if k.get('platform') and k.get('handle')}
     for base in seeds[: settings.osint_max_usernames_per_case]:
         variants = [base, base.replace('_', ''), f'{base}official', f'{base}.real', f'{base}news']
-        for platform in ['x', 'instagram', 'github', 'reddit', 'tiktok']:
+        for platform in ['x', 'instagram', 'github', 'reddit', 'tiktok', 'medium']:
             for handle in variants:
                 score = max((_similarity(handle, ref) for ref in baseline_handles), default=0.0)
-                candidates.append({'platform': platform, 'handle': handle, 'url': f'https://{platform}.com/{handle}', 'similarity_score': round(score, 3), 'judgment': 'high_match' if score >= 0.75 else 'possible_match' if score >= 0.5 else 'low_match'})
+                candidates.append({'platform': platform, 'handle': handle, 'url': platform_profile_url(platform, handle), 'similarity_score': round(score, 3), 'judgment': 'high_match' if score >= 0.75 else 'possible_match' if score >= 0.5 else 'low_match'})
 
     dedup: dict[tuple[str, str], dict[str, Any]] = {}
     for c in candidates:
@@ -369,13 +438,38 @@ def similar_accounts_ai(usernames: list[str], known_accounts: list[dict[str, str
     existing: list[dict[str, Any]] = []
     with httpx.Client(timeout=settings.osint_http_timeout_s, follow_redirects=True) as client:
         for c in ranked:
-            try:
-                r = client.get(c['url'])
-                if r.status_code < 400:
-                    c['exists'] = True
-                    existing.append(c)
-            except Exception:
+            lookup_result: dict[str, Any]
+            if c['platform'] == 'github':
+                lookup_result = _github_lookup(client, c['handle'])
+            elif c['platform'] == 'reddit':
+                lookup_result = _reddit_lookup(client, c['handle'])
+            elif c['platform'] == 'x':
+                lookup_result = _x_lookup(client, c['handle'])
+            else:
+                lookup_result = _generic_profile_lookup(client, c['platform'], c['handle'])
+
+            if not lookup_result.get('exists'):
                 continue
+
+            known_ref = known_by_platform.get((c['platform'], c['handle']))
+            avatar_similarity = 1.0 if known_ref else 0.5 if lookup_result.get('avatar_url') else 0.0
+            confidence = _account_confidence(
+                c['similarity_score'],
+                _similarity(c['handle'], lookup_result.get('profile', '')),
+                bool(lookup_result.get('has_posts')),
+                avatar_similarity,
+            )
+            c['exists'] = True
+            c['url'] = lookup_result.get('url', c['url'])
+            c['confidence'] = confidence
+            c['evidence_checks'] = {
+                'exists': True,
+                'profile_similarity': round(_similarity(c['handle'], lookup_result.get('profile', '')), 3),
+                'has_posts': bool(lookup_result.get('has_posts')),
+                'profile_picture_similarity': round(avatar_similarity, 3),
+            }
+            c['possible_false_positive'] = confidence < 0.45
+            existing.append(c)
     return existing[:60]
 
 
@@ -424,18 +518,18 @@ def build_graph_payload(case: Case, username_confirmed: list[dict[str, Any]], us
         uid = f"username:{row['username']}"
         pid = f"platform:{row['platform']}:{row['username']}"
         nodes.append({'id': uid, 'label': row['username'], 'type': 'Username'})
-        nodes.append({'id': pid, 'label': row['platform'], 'type': 'PlatformAccount'})
+        nodes.append({'id': pid, 'label': row['platform'], 'type': 'PlatformAccount', 'url': row.get('url'), 'confidence': row.get('confidence', 0.0)})
         links.append({'source': case.id, 'target': uid, 'label': 'INVESTIGATES'})
         links.append({'source': uid, 'target': pid, 'label': 'FOUND_ON'})
 
     for fp in username_false_positives:
         fid = f"false_positive:{fp['platform']}:{fp['username']}"
-        nodes.append({'id': fid, 'label': f"{fp['platform']}:{fp['username']}", 'type': 'FalsePositiveAccount'})
+        nodes.append({'id': fid, 'label': f"{fp['platform']}:{fp['username']}", 'type': 'FalsePositiveAccount', 'url': fp.get('url'), 'confidence': fp.get('confidence', 0.0)})
         links.append({'source': case.id, 'target': fid, 'label': 'FLAGGED_FALSE_POSITIVE'})
 
     for row in similar_accounts:
         sid = f"similar:{row['platform']}:{row['handle']}"
-        nodes.append({'id': sid, 'label': f"{row['platform']}:{row['handle']}", 'type': 'SimilarAccount', 'score': row['similarity_score']})
+        nodes.append({'id': sid, 'label': f"{row['platform']}:{row['handle']}", 'type': 'SimilarAccount', 'score': row['similarity_score'], 'url': row.get('url'), 'confidence': row.get('confidence', row.get('similarity_score', 0.0)), 'possible_false_positive': row.get('possible_false_positive', False)})
         links.append({'source': case.id, 'target': sid, 'label': 'AI_SIMILAR'})
 
     for row in emails:

@@ -83,6 +83,24 @@ if (authForm) {
 }
 
 if (caseForm) {
+  const imageInput = caseForm.querySelector('input[name="images"]');
+  const imageStatus = document.getElementById('image-upload-status');
+  const selectedFiles = [];
+
+  imageInput?.addEventListener('change', () => {
+    const files = Array.from(imageInput.files || []);
+    for (const file of files) {
+      const key = `${file.name}:${file.size}:${file.lastModified}`;
+      if (!selectedFiles.some((f) => `${f.name}:${f.size}:${f.lastModified}` === key)) {
+        selectedFiles.push(file);
+      }
+    }
+    const dt = new DataTransfer();
+    selectedFiles.forEach((f) => dt.items.add(f));
+    imageInput.files = dt.files;
+    if (imageStatus) imageStatus.textContent = `${selectedFiles.length} image(s) queued.`;
+  });
+
   caseForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     syncKnownAccounts();

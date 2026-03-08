@@ -4,6 +4,8 @@ const summaryBox = document.getElementById('summary-box');
 const graphBox = document.getElementById('graph-box');
 const findingsBox = document.getElementById('findings-box');
 const includeFalsePositives = document.getElementById('include-false-positives');
+const confidenceSlider = document.getElementById('confidence-slider');
+const confidenceValue = document.getElementById('confidence-value');
 
 function token() {
   return localStorage.getItem('token') || '';
@@ -41,12 +43,26 @@ function plotGraphLocations(graphData) {
   map.fitBounds(group.getBounds().pad(0.2));
 }
 
+function getNodeConfidence(node) {
+  if (typeof node.confidence === 'number') return node.confidence;
+  if (typeof node.score === 'number') return node.score;
+  return 1.0;
+}
+
 function renderSocialGraph(graphData) {
   const container = document.getElementById('social-graph');
   if (!container || typeof vis === 'undefined') return;
 
   const withFalsePositives = includeFalsePositives?.checked ?? false;
-  const filteredNodes = graphData.nodes.filter((n) => withFalsePositives || n.type !== 'FalsePositiveAccount');
+  const threshold = Number(confidenceSlider?.value || 0);
+  if (confidenceValue) confidenceValue.textContent = threshold.toFixed(2);
+
+  const filteredNodes = graphData.nodes.filter((n) => {
+    if (!withFalsePositives && n.type === 'FalsePositiveAccount') return false;
+    const nodeConfidence = getNodeConfidence(n);
+    const hasConfidence = ['PlatformAccount', 'SimilarAccount', 'FalsePositiveAccount'].includes(n.type);
+    return !hasConfidence || nodeConfidence >= threshold;
+  });
   const nodeIds = new Set(filteredNodes.map((n) => n.id));
   const filteredEdges = graphData.links.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
@@ -54,7 +70,7 @@ function renderSocialGraph(graphData) {
     filteredNodes.map((n) => ({
       id: n.id,
       label: n.label,
-      title: n.type,
+      title: `${n.type}${n.url ? `\n${n.url}` : ''}${n.confidence ? `\nconfidence: ${n.confidence}` : ''}`,
       color:
         n.type === 'FalsePositiveAccount'
           ? '#ef4444'
@@ -63,6 +79,7 @@ function renderSocialGraph(graphData) {
             : n.type === 'SimilarAccount'
               ? '#3b82f6'
               : '#94a3b8',
+      url: n.url,
     }))
   );
 
@@ -80,6 +97,13 @@ function renderSocialGraph(graphData) {
 
   if (network) network.destroy();
   network = new vis.Network(container, data, options);
+  network.on('click', (params) => {
+    if (!params.nodes?.length) return;
+    const clicked = visNodes.get(params.nodes[0]);
+    if (clicked?.url) {
+      window.open(clicked.url, '_blank', 'noopener,noreferrer');
+    }
+  });
 }
 
 async function refreshCaseData(caseId) {
@@ -103,6 +127,9 @@ async function refreshCaseData(caseId) {
 
 if (includeFalsePositives) {
   includeFalsePositives.addEventListener('change', () => renderSocialGraph(latestGraphData));
+}
+if (confidenceSlider) {
+  confidenceSlider.addEventListener('input', () => renderSocialGraph(latestGraphData));
 }
 
 if (runButton) {

@@ -28,13 +28,24 @@
         </article>
         <article class="card">
           <h3>Graph Snapshot</h3>
-          <pre id="graph-box">{% if job and job.findings and job.findings.get('graph') %}{{ job.findings.get('graph') | tojson(indent=2) }}{% else %}No graph yet.{% endif %}</pre>
+          <details>
+            <summary>Expand graph JSON</summary>
+            <pre id="graph-box">{% if job and job.findings and job.findings.get('graph') %}{{ job.findings.get('graph') | tojson(indent=2) }}{% else %}No graph yet.{% endif %}</pre>
+          </details>
         </article>
       </section>
 
       <section class="card">
         <h3>Social Web Graph</h3>
-        <label><input type="checkbox" id="include-false-positives" /> Include false positives</label>
+        <div class="graph-controls">
+          <label><input type="checkbox" id="include-false-positives" /> Include false positives</label>
+          <label>
+            Minimum confidence
+            <input type="range" id="confidence-slider" min="0" max="1" step="0.05" value="0" />
+            <span id="confidence-value">0.00</span>
+          </label>
+        </div>
+        <p class="muted">Tip: click a social account node to open the profile link.</p>
         <div id="social-graph"></div>
       </section>
 
@@ -45,7 +56,10 @@
 
       <section class="card">
         <h3>Evidence</h3>
-        <pre id="findings-box">{% if job and job.findings %}{{ job.findings | tojson(indent=2) }}{% else %}No findings yet.{% endif %}</pre>
+        <details>
+          <summary>Expand full findings JSON</summary>
+          <pre id="findings-box">{% if job and job.findings %}{{ job.findings | tojson(indent=2) }}{% else %}No findings yet.{% endif %}</pre>
+        </details>
       </section>
     </main>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

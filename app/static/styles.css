@@ -93,3 +93,15 @@ pre {
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
+
+.graph-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  align-items: center;
+}
+
+details > summary {
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
