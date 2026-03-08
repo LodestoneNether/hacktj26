@@ -610,11 +610,19 @@ def investigate_case(db: Session, case: Case, image_contents: list[bytes]) -> di
     usernames = [x.strip() for x in case.usernames_csv.split(',') if x.strip()]
     emails = [x.strip() for x in case.emails_csv.split(',') if x.strip()]
     known_accounts = parse_known_accounts(case.known_accounts_csv or '')
-
-    username_rows = username_adapter(usernames)
-    username_confirmed, username_false_positives = filter_false_positive_accounts(username_rows)
     email_rows = email_adapter(emails)
-    similar_accounts = similar_accounts_ai(usernames, known_accounts)
+
+    email_usernames = [
+        candidate.strip()
+        for email_row in email_rows
+        for candidate in email_row.get('possible_usernames', [])
+        if isinstance(candidate, str) and candidate.strip()
+    ]
+    username_search_terms = list(dict.fromkeys([*usernames, *email_usernames]))
+
+    username_rows = username_adapter(username_search_terms)
+    username_confirmed, username_false_positives = filter_false_positive_accounts(username_rows)
+    similar_accounts = similar_accounts_ai(username_search_terms, known_accounts)
     image = run_image_analysis(image_contents, case.consent_for_face_matching)
     graph = build_graph_payload(case, username_confirmed, username_false_positives, email_rows, image, similar_accounts)
 
